@@ -7,10 +7,12 @@ import (
 	"sync/atomic"
 
 	"mobileImportSim/base"
-	"mobileImportSim/importSim"
+	"mobileImportSim/gocbcoreUtils"
 
 	"github.com/couchbase/gocbcore/v10"
 	"github.com/couchbase/gomemcached"
+	xdcrBase "github.com/couchbase/goxdcr/base"
+	xdcrLog "github.com/couchbase/goxdcr/log"
 )
 
 // implements StreamObserver
@@ -39,7 +41,7 @@ func NewDcpHandler(dcpClient *DcpClient, index int, vbList []uint16, numberOfBin
 		break
 	}
 	bucketConnStr = fmt.Sprintf("%v%v", base.CouchbasePrefix, bucketConnStr)
-	agent := importSim.CreateSDKAgent(&gocbcore.AgentConfig{
+	agent := gocbcoreUtils.CreateSDKAgent(&gocbcore.AgentConfig{
 		SeedConfig: gocbcore.SeedConfig{MemdAddrs: []string{bucketConnStr}},
 		BucketName: dcpClient.dcpDriver.bucketName,
 		UserAgent:  fmt.Sprintf("mobileImportSim_%v/%v_%v", dcpClient.url, dcpClient.dcpDriver.bucketName, index),
@@ -106,8 +108,9 @@ done:
 
 func (dh *DcpHandler) simulateMobileImport(mut *Mutation) {
 	dh.dcpClient.dcpDriver.logger.Debugf("Simulating import for mutation=%v", mut)
-	errCnt := importSim.SimulateImportForDcpMutation(dh.agent, mut.Key, mut.Value, mut.ColId, mut.Datatype, mut.Cas, dh.dcpClient.dcpDriver.logger)
+	errCnt, importCnt := mut.SimulateImport(dh.agent, dh.dcpClient.dcpDriver.logger, dh.dcpClient.dcpDriver.bucketUUID)
 	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalFatalErrors, uint64(errCnt))
+	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalNewImports, uint64(importCnt))
 }
 
 func (dh *DcpHandler) processMutation(mut *Mutation) {
@@ -236,4 +239,74 @@ func (m *Mutation) IsMutation() bool {
 
 func (m *Mutation) IsSystemOrUnsubbedEvent() bool {
 	return m.OpCode == gomemcached.DCP_SYSTEM_EVENT || m.OpCode == gomemcached.DCP_SEQNO_ADV
+}
+
+func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonLogger, bucketUUID string) (int, int) {
+	key := m.Key
+	body := m.Value
+	colID := m.ColId
+	datatype := m.Datatype
+	casIn := m.Cas
+
+	fatalErrors := 0
+	importedCnt := 0
+
+	for {
+		var importCasIn uint64
+		var err1 error
+		if datatype&xdcrBase.PROTOCOL_BINARY_DATATYPE_XATTR > 0 {
+			it, err := xdcrBase.NewXattrIterator(body)
+			if err != nil {
+				logger.Errorf("For key %s, colId %v, error while initing xattr iterator, err=%v\n", key, colID, err)
+				continue
+			}
+			for it.HasNext() && err1 == nil {
+				k, v, err := it.Next()
+				if err != nil {
+					logger.Errorf("For key %s, colId %v, error while getting next xattr, err=%v\n", key, colID, err)
+					err1 = err
+					break
+				}
+
+				switch string(k) {
+				case xdcrBase.XATTR_IMPORTCAS:
+					importCasIn, err = xdcrBase.HexLittleEndianToUint64(v[1 : len(v)-1])
+					if err != nil {
+						logger.Errorf("For key %s, colId %v, error while parsing importCasIn, err=%v\n", key, colID, err)
+						err1 = err
+					}
+
+					if casIn < importCasIn {
+						logger.Errorf("For key %s, colId %v, FATAL error of cas < importCas for mutation, err=%v\n", key, colID, err)
+						err1 = err
+						fatalErrors++
+					}
+				}
+			}
+		}
+
+		if err1 != nil {
+			continue
+		}
+
+		casNow, syncNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
+		if err != nil {
+			logger.Errorf("For key %s, colId %v, error while subdoc-get err=%v\n", key, colID, err)
+			continue
+		}
+
+		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v: casNow %v, syncNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, casNow, syncNow, revIdNow, importCasNow)
+		if casIn > syncNow && casIn > importCasIn {
+			// only process if the mutation has not been processed before AND if the mutation is not an import mutation
+			importedCnt++
+			postImportCas, err := gocbcoreUtils.WriteDoc(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID)
+			if err != nil {
+				logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
+				continue
+			}
+			logger.Debugf("For key %s, colId %v, casIn %v: postImportCas %v", key, colID, casIn, postImportCas)
+		}
+		break
+	}
+	return fatalErrors, importedCnt
 }

@@ -3,6 +3,7 @@ Couchbase mobile import process simulator for XDCR/Mobile Coexistence testing.
 
 ## To run:
 ```
+$ make clean   # if needed, to start a fresh build process
 $ make deps
 $ make
 $ ./mobileImportSim -username <username> -password <password> -bucketname <bucketname> -hostAddr <couchbase-node-hostaddress>
@@ -40,4 +41,5 @@ Usage of ./mobileImportSim:
 ```
 
 ## TODO:
-- Updating cv, pv, mv
+- Add support for pruning by getting the pruning window (right no no pruning is done)
+- Move _importCas and _prevRev to _mou after MB-60897 is done

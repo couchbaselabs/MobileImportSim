@@ -119,7 +119,7 @@ func main() {
 
 	err = importSim.start()
 	if err != nil {
-		importSim.logger.Errorf("Error generating data files. err=%v", err)
+		importSim.logger.Errorf("Error quitting. err=%v", err)
 		os.Exit(1)
 	}
 }

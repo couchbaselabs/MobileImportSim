@@ -43,6 +43,7 @@ type DcpDriver struct {
 	totalNumReceivedFromDCP                uint64
 	totalSysOrUnsubbedEventReceivedFromDCP uint64
 	totalFatalErrors                       uint64
+	totalNewImports                        uint64
 
 	username, password string
 	logger             *xdcrLog.CommonLogger
@@ -158,8 +159,8 @@ func (d *DcpDriver) Stop() error {
 		return nil
 	}
 
-	d.logger.Infof("Dcp driver %v stopping after receiving %v mutations (%v system + unsubscribed events) and %v fatal errors", d.Name,
-		atomic.LoadUint64(&d.totalNumReceivedFromDCP), atomic.LoadUint64(&d.totalSysOrUnsubbedEventReceivedFromDCP), atomic.LoadUint64(&d.totalFatalErrors))
+	d.logger.Infof("Dcp driver %v stopping after receiving %v mutations (%v system + unsubscribed events), %v new imports and %v fatal errors", d.Name,
+		atomic.LoadUint64(&d.totalNumReceivedFromDCP), atomic.LoadUint64(&d.totalSysOrUnsubbedEventReceivedFromDCP), atomic.LoadUint64(&d.totalNewImports), atomic.LoadUint64(&d.totalFatalErrors))
 	defer d.logger.Infof("Dcp driver %v stopped", d.Name)
 	defer d.waitGroup.Done()
 

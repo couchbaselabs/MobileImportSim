@@ -299,7 +299,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 		if casIn > syncNow && casIn > importCasIn {
 			// only process if the mutation has not been processed before AND if the mutation is not an import mutation
 			importedCnt++
-			postImportCas, err := gocbcoreUtils.WriteDoc(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID)
+			postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID)
 			if err != nil {
 				logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 				continue

@@ -1,7 +1,6 @@
 package gocbcoreUtils
 
 import (
-	"fmt"
 	"strconv"
 	"time"
 
@@ -22,7 +21,7 @@ type SubdocSetResult struct {
 }
 
 // return Cas post-import and error
-func WriteDoc(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string) (uint64, error) {
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string) (uint64, error) {
 	signal := make(chan SubdocSetResult)
 
 	// roll over mv to pv OR cv to pv, if needed
@@ -50,7 +49,6 @@ func WriteDoc(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow
 	pruneFunc := xdcrBase.GetHLVPruneFunction(casNow, 0)
 	pos, _ = xdcrCrMeta.VersionMapToBytes(pv, pvBytes, pos, &pruneFunc)
 	pvBytes = pvBytes[:pos]
-	fmt.Printf("SUMUKH DEBUG PV=%s\n", pvBytes)
 
 	ops := make([]gocbcore.SubDocOp, 0)
 	// _importCas = macro expanded

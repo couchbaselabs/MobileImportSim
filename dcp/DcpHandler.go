@@ -107,7 +107,7 @@ done:
 }
 
 func (dh *DcpHandler) simulateMobileImport(mut *Mutation) {
-	dh.dcpClient.dcpDriver.logger.Debugf("Simulating import for mutation=%v", mut)
+	dh.dcpClient.dcpDriver.logger.Debugf("Simulating import, key=%s for mutation=%v", mut.Key, mut)
 	errCnt, importCnt := mut.SimulateImport(dh.agent, dh.dcpClient.dcpDriver.logger, dh.dcpClient.dcpDriver.bucketUUID)
 	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalFatalErrors, uint64(errCnt))
 	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalNewImports, uint64(importCnt))
@@ -247,25 +247,28 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 	colID := m.ColId
 	datatype := m.Datatype
 	casIn := m.Cas
+	var syncCasIn uint64
+	var importCasIn uint64
 
 	fatalErrors := 0
 	importedCnt := 0
 
+	// retry until every step is successful
 	for {
-		var importCasIn uint64
-		var err1 error
 		if datatype&xdcrBase.PROTOCOL_BINARY_DATATYPE_XATTR > 0 {
 			it, err := xdcrBase.NewXattrIterator(body)
 			if err != nil {
 				logger.Errorf("For key %s, colId %v, error while initing xattr iterator, err=%v\n", key, colID, err)
 				continue
 			}
+
+			var err1 error
 			for it.HasNext() && err1 == nil {
 				k, v, err := it.Next()
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while getting next xattr, err=%v\n", key, colID, err)
 					err1 = err
-					break
+					continue
 				}
 
 				switch string(k) {
@@ -274,38 +277,84 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 					if err != nil {
 						logger.Errorf("For key %s, colId %v, error while parsing importCasIn, err=%v\n", key, colID, err)
 						err1 = err
+						continue
 					}
 
 					if casIn < importCasIn {
 						logger.Errorf("For key %s, colId %v, FATAL error of cas < importCas for mutation, err=%v\n", key, colID, err)
-						err1 = err
 						fatalErrors++
+						err1 = err
+						continue
+					}
+				case xdcrBase.XATTR_MOBILE:
+					syncIt, err := xdcrBase.NewCCRXattrFieldIterator(v)
+					if err != nil {
+						logger.Errorf("For key %s, colId %v, error while initing sync xattr iterator, err=%v\n", key, colID, err)
+						err1 = err
+						continue
+					}
+
+					var err2 error
+					for syncIt.HasNext() && err2 == nil {
+						k1, v1, err := syncIt.Next()
+						if err != nil {
+							logger.Errorf("For key %s, colId %v, error while getting next syncIt xattr, err=%v\n", key, colID, err)
+							err2 = err
+							continue
+						}
+						switch string(k1) {
+						case gocbcoreUtils.XATTR_SYNC:
+							syncCasIn, err = xdcrBase.HexLittleEndianToUint64(v1[1 : len(v1)-1])
+							if err != nil {
+								logger.Errorf("For key %s, colId %v, error while parsing syncCasIn, err=%v\n", key, colID, err)
+								err2 = err
+								continue
+							}
+						}
+					}
+
+					if err2 != nil {
+						err1 = err2
+						continue
 					}
 				}
 			}
 		}
 
-		if err1 != nil {
-			continue
-		}
-
-		casNow, syncNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
+		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
 		if err != nil {
 			logger.Errorf("For key %s, colId %v, error while subdoc-get err=%v\n", key, colID, err)
 			continue
 		}
 
-		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v: casNow %v, syncNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, casNow, syncNow, revIdNow, importCasNow)
-		if casIn > syncNow && casIn > importCasIn {
-			// only process if the mutation has not been processed before AND if the mutation is not an import mutation
-			importedCnt++
-			postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID)
-			if err != nil {
-				logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
-				continue
+		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, syncCasNow, revIdNow, importCasNow)
+		if casIn > syncCasNow {
+			// only process the mutation, if it has not been processed before i.e if casIn > syncCasNow.
+
+			// 1. casIn == importCasIn and casIn == syncIn						-> local import mutation - skip import processing.
+			// 2. casIn == importCasIn and synCasIn exists and casIn > syncIn	-> non-local or replicated post-import mutation - update importCas, but not HLV (cvCas will not be equal to cas for a replicated post-import mutation, but importCas will be equal to cas).
+			// 3. casIn > importCasIn											-> non-import mutation - update both importCas and HLV.
+
+			if casIn > importCasIn {
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, true)
+				if err != nil {
+					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
+					continue
+				}
+				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
+				importedCnt++
+			} else if syncCasIn != 0 && casIn > syncCasIn {
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
+				if err != nil {
+					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
+					continue
+				}
+				logger.Debugf("For key %s, colId %v, casIn %v: non-local post-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
+				importedCnt++
 			}
-			logger.Debugf("For key %s, colId %v, casIn %v: postImportCas %v", key, colID, casIn, postImportCas)
 		}
+
+		// everything successful - break
 		break
 	}
 	return fatalErrors, importedCnt

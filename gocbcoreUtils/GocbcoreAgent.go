@@ -12,7 +12,8 @@ import (
 	xdcrLog "github.com/couchbase/goxdcr/log"
 )
 
-const XATTR_SYNC string = "_sync.simCas"
+const SYNC_SIMCAS string = "simCas"
+const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + "." + SYNC_SIMCAS
 const XATTR_PREVREV string = "_prevRev"
 
 type SubdocSetResult struct {
@@ -20,8 +21,8 @@ type SubdocSetResult struct {
 	Err error
 }
 
-// return Cas post-import and error
-func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string) (uint64, error) {
+// return Cas post-import and error, if any
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
 
 	// roll over mv to pv OR cv to pv, if needed
@@ -50,6 +51,8 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 	pos, _ = xdcrCrMeta.VersionMapToBytes(pv, pvBytes, pos, &pruneFunc)
 	pvBytes = pvBytes[:pos]
 
+	casNowBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
+
 	ops := make([]gocbcore.SubDocOp, 0)
 	// _importCas = macro expanded
 	ops = append(ops, gocbcore.SubDocOp{
@@ -59,78 +62,78 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
 	})
 
-	// _sync = casNow = pre-import Cas
-	syncBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
+	// _sync.simCas = casNow = pre-import Cas
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
 		Path:  XATTR_SYNC,
-		Value: syncBytes,
+		Value: casNowBytes,
 	})
 
-	// _vv.cvCas = casNow = pre-import Cas
-	cvCasBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
-	ops = append(ops, gocbcore.SubDocOp{
-		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-		Path:  xdcrCrMeta.XATTR_CVCAS_PATH,
-		Value: cvCasBytes,
-	})
-
-	// _prevRev = revIdNow = pre-import revId
-	revIdBytes := []byte("\"" + strconv.Itoa(int(revIdNow)) + "\"")
-	ops = append(ops, gocbcore.SubDocOp{
-		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-		Path:  XATTR_PREVREV,
-		Value: revIdBytes,
-	})
-
-	// _vv.src = bucketUUID
-	srcBytes := []byte("\"" + src + "\"")
-	ops = append(ops, gocbcore.SubDocOp{
-		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-		Path:  xdcrCrMeta.XATTR_SRC_PATH,
-		Value: []byte(srcBytes),
-	})
-
-	// _vv.ver = macro-expanded
-	ops = append(ops, gocbcore.SubDocOp{
-		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath | memd.SubdocFlagExpandMacros,
-		Path:  xdcrCrMeta.XATTR_VER_PATH,
-		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
-	})
-
-	// _vv.pv = updated pv if cv/mv is rolled over
-	if len(pvBytes) > 2 {
-		// set new pv
+	if updateHLV {
+		// _vv.cvCas = casNow = pre-import Cas
 		ops = append(ops, gocbcore.SubDocOp{
 			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-			Path:  xdcrCrMeta.HLV_PV_FIELD,
-			Value: pvBytes,
+			Path:  xdcrCrMeta.XATTR_CVCAS_PATH,
+			Value: casNowBytes,
 		})
-	} else if oldPvLen > 2 {
-		// delete old pv
-		ops = append(ops, gocbcore.SubDocOp{
-			Op:    memd.SubDocOpType(memd.CmdSubDocDelete),
-			Flags: memd.SubdocFlagXattrPath,
-			Path:  xdcrCrMeta.XATTR_PV_PATH,
-			Value: nil,
-		})
-	}
 
-	// _vv.mv - remove mv, it is rolled to mv if non-empty
-	if oldMvLen > 2 {
-		// delete old mv
+		// _prevRev = revIdNow = pre-import revId
+		revIdBytes := []byte("\"" + strconv.Itoa(int(revIdNow)) + "\"")
 		ops = append(ops, gocbcore.SubDocOp{
-			Op:    memd.SubDocOpType(memd.CmdSubDocDelete),
-			Flags: memd.SubdocFlagXattrPath,
-			Path:  xdcrCrMeta.XATTR_MV_PATH,
-			Value: nil,
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  XATTR_PREVREV,
+			Value: revIdBytes,
 		})
+
+		// _vv.src = bucketUUID
+		srcBytes := []byte("\"" + src + "\"")
+		ops = append(ops, gocbcore.SubDocOp{
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  xdcrCrMeta.XATTR_SRC_PATH,
+			Value: []byte(srcBytes),
+		})
+
+		// _vv.ver = casNow = pre-import Cas
+		ops = append(ops, gocbcore.SubDocOp{
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  xdcrCrMeta.XATTR_VER_PATH,
+			Value: casNowBytes,
+		})
+
+		// _vv.pv = updated pv if cv/mv is rolled over
+		if len(pvBytes) > 2 {
+			// set new pv
+			ops = append(ops, gocbcore.SubDocOp{
+				Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+				Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+				Path:  xdcrCrMeta.HLV_PV_FIELD,
+				Value: pvBytes,
+			})
+		} else if oldPvLen > 2 {
+			// delete old pv
+			ops = append(ops, gocbcore.SubDocOp{
+				Op:    memd.SubDocOpType(memd.CmdSubDocDelete),
+				Flags: memd.SubdocFlagXattrPath,
+				Path:  xdcrCrMeta.XATTR_PV_PATH,
+				Value: nil,
+			})
+		}
+
+		// _vv.mv - remove mv, it is rolled to mv if non-empty
+		if oldMvLen > 2 {
+			// delete old mv
+			ops = append(ops, gocbcore.SubDocOp{
+				Op:    memd.SubDocOpType(memd.CmdSubDocDelete),
+				Flags: memd.SubdocFlagXattrPath,
+				Path:  xdcrCrMeta.XATTR_MV_PATH,
+				Value: nil,
+			})
+		}
 	}
 
 	agent.MutateIn(

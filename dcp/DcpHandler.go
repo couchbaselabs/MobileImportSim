@@ -13,6 +13,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	xdcrBase "github.com/couchbase/goxdcr/base"
 	xdcrLog "github.com/couchbase/goxdcr/log"
+	"github.com/couchbaselabs/gojsonsm"
 )
 
 // implements StreamObserver
@@ -272,12 +273,52 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				}
 
 				switch string(k) {
-				case xdcrBase.XATTR_IMPORTCAS:
-					importCasIn, err = xdcrBase.HexLittleEndianToUint64(v[1 : len(v)-1])
-					if err != nil {
-						logger.Errorf("For key %s, colId %v, error while parsing importCasIn, err=%v\n", key, colID, err)
-						err1 = err
-						continue
+				case gocbcoreUtils.XATTR_MOU:
+					mouIt := gojsonsm.NewJsonTokenizer()
+					mouIt.Reset(v)
+
+					done := false
+					for !done {
+						tknType, tkn, _, err := mouIt.Step()
+						if err != nil {
+							logger.Errorf("For key %s, colId %v, error while getting next tkn, err=%v\n", key, colID, err)
+							err1 = err
+							continue
+						}
+
+						if gojsonsm.IsTokenEnd(tknType) {
+							done = true
+							continue
+						}
+
+						if !gojsonsm.IsTokenString(tknType) {
+							continue
+						}
+						switch string(tkn[1 : len(tkn)-1]) {
+						case gocbcoreUtils.IMPORTCAS:
+							// :
+							_, _, _, err := mouIt.Step()
+							if err != nil {
+								logger.Errorf("For key %s, colId %v, error while getting next tkn, expecting :, err=%v\n", key, colID, err)
+								err1 = err
+								continue
+							}
+
+							// importCAS value
+							_, tkn, _, err := mouIt.Step()
+							if err != nil {
+								logger.Errorf("For key %s, colId %v, error while getting next tkn, expecting importCas value, err=%v\n", key, colID, err)
+								err1 = err
+								continue
+							}
+
+							importCasIn, err = xdcrBase.HexLittleEndianToUint64(tkn[1 : len(tkn)-1])
+							if err != nil {
+								logger.Errorf("For key %s, colId %v, error while parsing importCas value, err=%v\n", key, colID, err)
+								err1 = err
+								continue
+							}
+						}
 					}
 
 					if casIn < importCasIn {
@@ -303,8 +344,8 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 							continue
 						}
 						switch string(k1) {
-						case gocbcoreUtils.XATTR_SYNC:
-							syncCasIn, err = xdcrBase.HexLittleEndianToUint64(v1[1 : len(v1)-1])
+						case gocbcoreUtils.SIMCAS:
+							syncCasIn, err = xdcrBase.HexLittleEndianToUint64(v1)
 							if err != nil {
 								logger.Errorf("For key %s, colId %v, error while parsing syncCasIn, err=%v\n", key, colID, err)
 								err2 = err
@@ -353,7 +394,6 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				importedCnt++
 			}
 		}
-
 		// everything successful - break
 		break
 	}

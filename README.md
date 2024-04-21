@@ -42,4 +42,3 @@ Usage of ./mobileImportSim:
 
 ## TODO:
 - Add support for pruning by getting the pruning window (right no no pruning is done)
-- Move _importCas and _prevRev to _mou after MB-60897 is done

@@ -93,15 +93,6 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 			Value: casNowBytes,
 		})
 
-		// _prevRev = revIdNow = pre-import revId
-		revIdBytes := []byte("\"" + strconv.Itoa(int(revIdNow)) + "\"")
-		ops = append(ops, gocbcore.SubDocOp{
-			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-			Path:  XATTR_PREVREV,
-			Value: revIdBytes,
-		})
-
 		// _vv.src = bucketUUID
 		base64Src, err := xdcrBase.HexToBase64(string(src))
 		if err != nil {
@@ -186,6 +177,7 @@ type SubdocGetResult struct {
 	OldPvLen, OldMvLen          uint64
 	Src                         xdcrHLV.DocumentSourceId
 	Ver                         uint64
+	CvCas                       uint64
 }
 
 func xattrVVtoMap(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
@@ -212,7 +204,7 @@ func xattrVVtoMap(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
 	return res, nil
 }
 
-func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, revID, importCas uint64, pv, mv xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, src xdcrHLV.DocumentSourceId, ver uint64, err error) {
+func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, revID, importCas uint64, pv, mv xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, src xdcrHLV.DocumentSourceId, ver uint64, cvCas uint64, err error) {
 	signal := make(chan SubdocGetResult)
 
 	ops := make([]gocbcore.SubDocOp, 0)
@@ -253,6 +245,11 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
 		Path:  string(xdcrCrMeta.HLV_VER_FIELD)})
+
+	ops = append(ops, gocbcore.SubDocOp{
+		Op:    memd.SubDocOpType(memd.SubDocOpGet),
+		Flags: memd.SubdocFlagXattrPath,
+		Path:  string(xdcrCrMeta.HLV_CVCAS_FIELD)})
 
 	agent.LookupIn(
 		gocbcore.LookupInOptions{
@@ -348,6 +345,17 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 				res.Ver = ver
 			}
 
+			// _vv.cvCas
+			if lir.Ops[7].Err == nil && len(lir.Ops[7].Value) > 2 {
+				cvCasBytes := lir.Ops[7].Value
+				cvCas, err1 = xdcrBase.HexLittleEndianToUint64(cvCasBytes[1 : len(cvCasBytes)-1])
+				if err1 != nil {
+					signal <- SubdocGetResult{Err: err1}
+					return
+				}
+				res.CvCas = cvCas
+			}
+
 			signal <- res
 		},
 	)
@@ -363,6 +371,7 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	importCas = result.ImportCas
 	oldPvLen = result.OldPvLen
 	oldMvLen = result.OldMvLen
+	cvCas = result.CvCas
 	return
 }
 

@@ -41,4 +41,5 @@ Usage of ./mobileImportSim:
 ```
 
 ## TODO:
-- Add support for pruning by getting the pruning window (right no no pruning is done)
+- Add support for pruning by getting the pruning window (right now no pruning is done)
+- Collection aware DCP setup (right now only _default._default is streamed)

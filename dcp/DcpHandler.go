@@ -362,13 +362,13 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			}
 		}
 
-		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
+		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, cvCasNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
 		if err != nil {
 			logger.Errorf("For key %s, colId %v, error while subdoc-get err=%v\n", key, colID, err)
 			continue
 		}
 
-		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, syncCasNow, revIdNow, importCasNow)
+		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, cvCasNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, cvCasNow, syncCasNow, revIdNow, importCasNow)
 		if casIn > syncCasNow {
 			// only process the mutation, if it has not been processed before i.e if casIn > syncCasNow.
 
@@ -377,7 +377,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			// 3. casIn > importCasIn											-> non-import mutation - update both importCas and HLV.
 
 			if casIn > importCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, true)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					continue

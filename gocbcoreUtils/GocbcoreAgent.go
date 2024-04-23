@@ -39,15 +39,19 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 		}
 	} else if len(srcNow) > 0 {
 		// Add cv to pv only if mv does not exist.
-		// When there is no mv, cv represents a mutation and needs to be added to vrsion history
+		// When there is no mv, cv represents a mutation and needs to be added to version history
+		if len(pv) == 0 {
+			pv = make(xdcrHLV.VersionsMap)
+		}
 		pv[srcNow] = verNow
+
 	}
 	// Make sure the cv is not repeated in pv
 	delete(pv, src)
 
 	pvMaxLen := oldPvLen + oldMvLen + uint64(len(srcNow)) +
 		2 /* quotes for srcNow */ + 16 /* ver in hex */ + 2 /* 0x */ +
-		2 /* quotes for verNow */ + 2 /* { and } */
+		2 /* quotes for verNow */ + 2 /* { and } */ + 1 /* : */
 	pvBytes := make([]byte, pvMaxLen)
 	pos := 0
 	// 0 indicates no pruning (for now). TODO: Use pruning window
@@ -120,7 +124,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 			ops = append(ops, gocbcore.SubDocOp{
 				Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 				Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-				Path:  xdcrCrMeta.HLV_PV_FIELD,
+				Path:  xdcrCrMeta.XATTR_PV_PATH,
 				Value: pvBytes,
 			})
 		} else if oldPvLen > 2 {
@@ -229,27 +233,27 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_PV_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_PV_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_MV_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_MV_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_SRC_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_SRC_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_VER_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_VER_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_CVCAS_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_CVCAS_PATH)})
 
 	agent.LookupIn(
 		gocbcore.LookupInOptions{
@@ -372,6 +376,8 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	oldPvLen = result.OldPvLen
 	oldMvLen = result.OldMvLen
 	cvCas = result.CvCas
+	pv = result.Pv
+	mv = result.Mv
 	return
 }
 

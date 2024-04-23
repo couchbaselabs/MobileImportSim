@@ -286,12 +286,12 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 							continue
 						}
 
-						if gojsonsm.IsTokenEnd(tknType) {
+						if tknType.IsEnd() {
 							done = true
 							continue
 						}
 
-						if !gojsonsm.IsTokenString(tknType) {
+						if !tknType.IsString() {
 							continue
 						}
 						switch string(tkn[1 : len(tkn)-1]) {

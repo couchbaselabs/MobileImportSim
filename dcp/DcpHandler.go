@@ -377,7 +377,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			// 3. casIn > importCasIn											-> non-import mutation - update both importCas and HLV.
 
 			if casIn > importCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					continue
@@ -385,7 +385,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
 			} else if syncCasIn != 0 && casIn > syncCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					continue

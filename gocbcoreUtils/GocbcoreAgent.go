@@ -27,7 +27,7 @@ type SubdocSetResult struct {
 }
 
 // return Cas post-import and error, if any
-func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
 	// roll over mv to pv OR cv to pv, if needed
 	src := xdcrHLV.DocumentSourceId(bucketUUID)
@@ -70,16 +70,19 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 		Path:  XATTR_IMPORTCAS,
 		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
 	})
-
-	// _mou.pRev = pre-import revID
-	revID := fmt.Sprintf("\"%v\"", revIdNow)
-	ops = append(ops, gocbcore.SubDocOp{
-		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-		Path:  XATTR_PREVREV,
-		Value: []byte(revID),
-	})
-
+	// If this document is not imported before i.e. importCas=0 we should stamp _mou.pRev
+	// If this document was imported before but the HLV is outdated due to a local mutation at the cluster then _mou.pRev should be updated
+	if importCasIn == 0 || updateHLV {
+		// _mou.pRev = pre-import revID
+		// _mou.pRev is technically not a part of HLV but it should be updated only when HLV is updated because it is similar to cvCAS
+		revID := fmt.Sprintf("\"%v\"", revIdNow)
+		ops = append(ops, gocbcore.SubDocOp{
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  XATTR_PREVREV,
+			Value: []byte(revID),
+		})
+	}
 	// _sync.simCas = macro expandaded (???)
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
@@ -96,7 +99,6 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 			Path:  xdcrCrMeta.XATTR_CVCAS_PATH,
 			Value: casNowBytes,
 		})
-
 		// _vv.src = bucketUUID
 		base64Src, err := xdcrBase.HexToBase64(string(src))
 		if err != nil {

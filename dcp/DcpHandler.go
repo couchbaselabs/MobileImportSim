@@ -274,53 +274,23 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 
 				switch string(k) {
 				case gocbcoreUtils.XATTR_MOU:
-					mouIt := gojsonsm.NewJsonTokenizer()
-					mouIt.Reset(v)
+					newMou := make([]byte, len(v))
+					removed := make(map[string][]byte)
+					_, _, _, err = gojsonsm.MatchAndRemoveItemsFromJsonObject(v, []string{gocbcoreUtils.IMPORTCAS, gocbcoreUtils.PREVREV}, newMou, removed)
+					if err != nil {
+						err1 = err
+						continue
+					}
 
-					done := false
-					for !done {
-						tknType, tkn, _, err := mouIt.Step()
+					importCas, ok1 := removed[gocbcoreUtils.IMPORTCAS]
+					if ok1 && importCas != nil {
+						importCasIn, err = xdcrBase.HexLittleEndianToUint64(importCas[1 : len(importCas)-1])
 						if err != nil {
-							logger.Errorf("For key %s, colId %v, error while getting next tkn, err=%v\n", key, colID, err)
+							logger.Errorf("For key %s, colId %v, error while parsing importCas value, err=%v\n", key, colID, err)
 							err1 = err
 							continue
 						}
-
-						if tknType.IsEnd() {
-							done = true
-							continue
-						}
-
-						if !tknType.IsString() {
-							continue
-						}
-						switch string(tkn[1 : len(tkn)-1]) {
-						case gocbcoreUtils.IMPORTCAS:
-							// :
-							_, _, _, err := mouIt.Step()
-							if err != nil {
-								logger.Errorf("For key %s, colId %v, error while getting next tkn, expecting :, err=%v\n", key, colID, err)
-								err1 = err
-								continue
-							}
-
-							// importCAS value
-							_, tkn, _, err := mouIt.Step()
-							if err != nil {
-								logger.Errorf("For key %s, colId %v, error while getting next tkn, expecting importCas value, err=%v\n", key, colID, err)
-								err1 = err
-								continue
-							}
-
-							importCasIn, err = xdcrBase.HexLittleEndianToUint64(tkn[1 : len(tkn)-1])
-							if err != nil {
-								logger.Errorf("For key %s, colId %v, error while parsing importCas value, err=%v\n", key, colID, err)
-								err1 = err
-								continue
-							}
-						}
 					}
-
 					if casIn < importCasIn {
 						logger.Errorf("For key %s, colId %v, FATAL error of cas < importCas for mutation, err=%v\n", key, colID, err)
 						fatalErrors++

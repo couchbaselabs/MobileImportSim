@@ -13,6 +13,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	xdcrBase "github.com/couchbase/goxdcr/base"
 	xdcrLog "github.com/couchbase/goxdcr/log"
+	"github.com/couchbaselabs/gojsonsm"
 )
 
 // implements StreamObserver
@@ -272,14 +273,24 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				}
 
 				switch string(k) {
-				case xdcrBase.XATTR_IMPORTCAS:
-					importCasIn, err = xdcrBase.HexLittleEndianToUint64(v[1 : len(v)-1])
+				case gocbcoreUtils.XATTR_MOU:
+					newMou := make([]byte, len(v))
+					removed := make(map[string][]byte)
+					_, _, _, err = gojsonsm.MatchAndRemoveItemsFromJsonObject(v, []string{gocbcoreUtils.IMPORTCAS, gocbcoreUtils.PREVREV}, newMou, removed)
 					if err != nil {
-						logger.Errorf("For key %s, colId %v, error while parsing importCasIn, err=%v\n", key, colID, err)
 						err1 = err
 						continue
 					}
 
+					importCas, ok1 := removed[gocbcoreUtils.IMPORTCAS]
+					if ok1 && importCas != nil {
+						importCasIn, err = xdcrBase.HexLittleEndianToUint64(importCas[1 : len(importCas)-1])
+						if err != nil {
+							logger.Errorf("For key %s, colId %v, error while parsing importCas value, err=%v\n", key, colID, err)
+							err1 = err
+							continue
+						}
+					}
 					if casIn < importCasIn {
 						logger.Errorf("For key %s, colId %v, FATAL error of cas < importCas for mutation, err=%v\n", key, colID, err)
 						fatalErrors++
@@ -303,8 +314,8 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 							continue
 						}
 						switch string(k1) {
-						case gocbcoreUtils.XATTR_SYNC:
-							syncCasIn, err = xdcrBase.HexLittleEndianToUint64(v1[1 : len(v1)-1])
+						case gocbcoreUtils.SIMCAS:
+							syncCasIn, err = xdcrBase.HexLittleEndianToUint64(v1)
 							if err != nil {
 								logger.Errorf("For key %s, colId %v, error while parsing syncCasIn, err=%v\n", key, colID, err)
 								err2 = err
@@ -321,13 +332,13 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			}
 		}
 
-		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
+		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, cvCasNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
 		if err != nil {
 			logger.Errorf("For key %s, colId %v, error while subdoc-get err=%v\n", key, colID, err)
 			continue
 		}
 
-		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, syncCasNow, revIdNow, importCasNow)
+		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, cvCasNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, cvCasNow, syncCasNow, revIdNow, importCasNow)
 		if casIn > syncCasNow {
 			// only process the mutation, if it has not been processed before i.e if casIn > syncCasNow.
 
@@ -336,7 +347,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			// 3. casIn > importCasIn											-> non-import mutation - update both importCas and HLV.
 
 			if casIn > importCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, true)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					continue
@@ -344,7 +355,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
 			} else if syncCasIn != 0 && casIn > syncCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					continue
@@ -353,7 +364,6 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				importedCnt++
 			}
 		}
-
 		// everything successful - break
 		break
 	}

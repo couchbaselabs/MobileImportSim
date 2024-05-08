@@ -1,6 +1,7 @@
 package gocbcoreUtils
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -12,9 +13,13 @@ import (
 	xdcrLog "github.com/couchbase/goxdcr/log"
 )
 
-const SYNC_SIMCAS string = "simCas"
-const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + "." + SYNC_SIMCAS
-const XATTR_PREVREV string = "_prevRev"
+const SIMCAS string = "simCas"
+const PREVREV string = "pRev"
+const IMPORTCAS string = "importCAS"
+const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + "." + SIMCAS
+const XATTR_MOU string = "_mou"
+const XATTR_PREVREV string = XATTR_MOU + "." + PREVREV
+const XATTR_IMPORTCAS string = XATTR_MOU + "." + IMPORTCAS
 
 type SubdocSetResult struct {
 	Cas uint64
@@ -22,9 +27,8 @@ type SubdocSetResult struct {
 }
 
 // return Cas post-import and error, if any
-func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
-
 	// roll over mv to pv OR cv to pv, if needed
 	src := xdcrHLV.DocumentSourceId(bucketUUID)
 	pv := pvNow
@@ -35,15 +39,19 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 		}
 	} else if len(srcNow) > 0 {
 		// Add cv to pv only if mv does not exist.
-		// When there is no mv, cv represents a mutation and needs to be added to vrsion history
+		// When there is no mv, cv represents a mutation and needs to be added to version history
+		if len(pv) == 0 {
+			pv = make(xdcrHLV.VersionsMap)
+		}
 		pv[srcNow] = verNow
+
 	}
 	// Make sure the cv is not repeated in pv
 	delete(pv, src)
 
 	pvMaxLen := oldPvLen + oldMvLen + uint64(len(srcNow)) +
 		2 /* quotes for srcNow */ + 16 /* ver in hex */ + 2 /* 0x */ +
-		2 /* quotes for verNow */ + 2 /* { and } */
+		2 /* quotes for verNow */ + 2 /* { and } */ + 1 /* : */
 	pvBytes := make([]byte, pvMaxLen)
 	pos := 0
 	// 0 indicates no pruning (for now). TODO: Use pruning window
@@ -54,20 +62,33 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 	casNowBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
 
 	ops := make([]gocbcore.SubDocOp, 0)
-	// _importCas = macro expanded
+
+	// _mou.importCas = macro expanded
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath | memd.SubdocFlagExpandMacros,
-		Path:  xdcrBase.XATTR_IMPORTCAS,
+		Path:  XATTR_IMPORTCAS,
 		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
 	})
-
-	// _sync.simCas = casNow = pre-import Cas
+	// If this document is not imported before i.e. importCas=0 we should stamp _mou.pRev
+	// If this document was imported before but the HLV is outdated due to a local mutation at the cluster then _mou.pRev should be updated
+	if importCasIn == 0 || updateHLV {
+		// _mou.pRev = pre-import revID
+		// _mou.pRev is technically not a part of HLV but it should be updated only when HLV is updated because it is similar to cvCAS
+		revID := fmt.Sprintf("\"%v\"", revIdNow)
+		ops = append(ops, gocbcore.SubDocOp{
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  XATTR_PREVREV,
+			Value: []byte(revID),
+		})
+	}
+	// _sync.simCas = macro expandaded (???)
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath | memd.SubdocFlagExpandMacros,
 		Path:  XATTR_SYNC,
-		Value: casNowBytes,
+		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
 	})
 
 	if updateHLV {
@@ -78,18 +99,12 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 			Path:  xdcrCrMeta.XATTR_CVCAS_PATH,
 			Value: casNowBytes,
 		})
-
-		// _prevRev = revIdNow = pre-import revId
-		revIdBytes := []byte("\"" + strconv.Itoa(int(revIdNow)) + "\"")
-		ops = append(ops, gocbcore.SubDocOp{
-			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-			Path:  XATTR_PREVREV,
-			Value: revIdBytes,
-		})
-
 		// _vv.src = bucketUUID
-		srcBytes := []byte("\"" + src + "\"")
+		base64Src, err := xdcrBase.HexToBase64(string(src))
+		if err != nil {
+			return 0, err
+		}
+		srcBytes := []byte("\"" + string(base64Src) + "\"")
 		ops = append(ops, gocbcore.SubDocOp{
 			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
@@ -111,7 +126,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casNow, revIdNow uin
 			ops = append(ops, gocbcore.SubDocOp{
 				Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 				Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
-				Path:  xdcrCrMeta.HLV_PV_FIELD,
+				Path:  xdcrCrMeta.XATTR_PV_PATH,
 				Value: pvBytes,
 			})
 		} else if oldPvLen > 2 {
@@ -168,6 +183,7 @@ type SubdocGetResult struct {
 	OldPvLen, OldMvLen          uint64
 	Src                         xdcrHLV.DocumentSourceId
 	Ver                         uint64
+	CvCas                       uint64
 }
 
 func xattrVVtoMap(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
@@ -194,7 +210,7 @@ func xattrVVtoMap(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
 	return res, nil
 }
 
-func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, revID, importCas uint64, pv, mv xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, src xdcrHLV.DocumentSourceId, ver uint64, err error) {
+func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, revID, importCas uint64, pv, mv xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, src xdcrHLV.DocumentSourceId, ver uint64, cvCas uint64, err error) {
 	signal := make(chan SubdocGetResult)
 
 	ops := make([]gocbcore.SubDocOp, 0)
@@ -213,28 +229,33 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrBase.XATTR_IMPORTCAS),
+		Path:  string(XATTR_IMPORTCAS),
 	})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_PV_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_PV_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_MV_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_MV_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_SRC_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_SRC_PATH)})
 
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.SubDocOpGet),
 		Flags: memd.SubdocFlagXattrPath,
-		Path:  string(xdcrCrMeta.HLV_VER_FIELD)})
+		Path:  string(xdcrCrMeta.XATTR_VER_PATH)})
+
+	ops = append(ops, gocbcore.SubDocOp{
+		Op:    memd.SubDocOpType(memd.SubDocOpGet),
+		Flags: memd.SubdocFlagXattrPath,
+		Path:  string(xdcrCrMeta.XATTR_CVCAS_PATH)})
 
 	agent.LookupIn(
 		gocbcore.LookupInOptions{
@@ -330,6 +351,17 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 				res.Ver = ver
 			}
 
+			// _vv.cvCas
+			if lir.Ops[7].Err == nil && len(lir.Ops[7].Value) > 2 {
+				cvCasBytes := lir.Ops[7].Value
+				cvCas, err1 = xdcrBase.HexLittleEndianToUint64(cvCasBytes[1 : len(cvCasBytes)-1])
+				if err1 != nil {
+					signal <- SubdocGetResult{Err: err1}
+					return
+				}
+				res.CvCas = cvCas
+			}
+
 			signal <- res
 		},
 	)
@@ -345,6 +377,9 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	importCas = result.ImportCas
 	oldPvLen = result.OldPvLen
 	oldMvLen = result.OldMvLen
+	cvCas = result.CvCas
+	pv = result.Pv
+	mv = result.Mv
 	return
 }
 

@@ -7,8 +7,10 @@ import (
 
 	"github.com/couchbase/gocbcore/v10"
 	"github.com/couchbase/gocbcore/v10/memd"
+	"github.com/couchbase/goxdcr/base"
 	xdcrBase "github.com/couchbase/goxdcr/base"
 	xdcrCrMeta "github.com/couchbase/goxdcr/crMeta"
+	"github.com/couchbase/goxdcr/hlv"
 	xdcrHLV "github.com/couchbase/goxdcr/hlv"
 	xdcrLog "github.com/couchbase/goxdcr/log"
 )
@@ -56,7 +58,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 	pos := 0
 	// 0 indicates no pruning (for now). TODO: Use pruning window
 	pruneFunc := xdcrBase.GetHLVPruneFunction(casNow, 0)
-	pos, _ = xdcrCrMeta.VersionMapToBytes(pv, pvBytes, pos, &pruneFunc)
+	pos, _ = xdcrCrMeta.VersionMapToDeltasBytes(pv, pvBytes, pos, &pruneFunc)
 	pvBytes = pvBytes[:pos]
 
 	casNowBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
@@ -139,7 +141,8 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 			})
 		}
 
-		// _vv.mv - remove mv, it is rolled to mv if non-empty
+		// _vv.mv - mv won't exists anymore since we rolled it over to pv
+		// remove mv, it is rolled to mv if non-empty
 		if oldMvLen > 2 {
 			// delete old mv
 			ops = append(ops, gocbcore.SubDocOp{
@@ -186,28 +189,34 @@ type SubdocGetResult struct {
 	CvCas                       uint64
 }
 
-func xattrVVtoMap(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
-	res := make(xdcrHLV.VersionsMap)
+func xattrVVtoDeltas(vvBytes []byte) (hlv.VersionsMap, error) {
+	vv := make(hlv.VersionsMap)
+
 	if len(vvBytes) == 0 {
-		return res, nil
+		return vv, nil
 	}
-	it, err := xdcrBase.NewCCRXattrFieldIterator(vvBytes)
+
+	it, err := base.NewCCRXattrFieldIterator(vvBytes)
 	if err != nil {
 		return nil, err
 	}
+	var lastEntryVersion uint64
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		src := xdcrHLV.DocumentSourceId(k)
-		ver, err := xdcrBase.HexLittleEndianToUint64(v)
+		src := hlv.DocumentSourceId(k)
+		ver, err := base.HexLittleEndianToUint64(v)
 		if err != nil {
 			return nil, err
 		}
-		res[src] = ver
+
+		lastEntryVersion = ver + lastEntryVersion
+		vv[src] = lastEntryVersion
 	}
-	return res, nil
+
+	return vv, nil
 }
 
 func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, revID, importCas uint64, pv, mv xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, src xdcrHLV.DocumentSourceId, ver uint64, cvCas uint64, err error) {
@@ -312,7 +321,7 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 			// _vv.pv
 			if lir.Ops[3].Err == nil && len(lir.Ops[3].Value) > 2 {
 				pvBytes := lir.Ops[3].Value
-				pv, err1 = xattrVVtoMap(pvBytes)
+				pv, err1 = xattrVVtoDeltas(pvBytes)
 				if err1 != nil {
 					signal <- SubdocGetResult{Err: err1}
 					return
@@ -324,7 +333,7 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 			// _vv.mv
 			if lir.Ops[4].Err == nil && len(lir.Ops[4].Value) > 2 {
 				mvBytes := lir.Ops[4].Value
-				mv, err1 = xattrVVtoMap(mvBytes)
+				mv, err1 = xattrVVtoDeltas(mvBytes)
 				if err1 != nil {
 					signal <- SubdocGetResult{Err: err1}
 					return

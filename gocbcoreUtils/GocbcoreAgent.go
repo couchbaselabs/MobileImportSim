@@ -387,8 +387,16 @@ func GetDocAsOfNow(agent *gocbcore.Agent, key []byte, colID uint32) (cas, sync, 
 	oldPvLen = result.OldPvLen
 	oldMvLen = result.OldMvLen
 	cvCas = result.CvCas
-	pv = result.Pv
-	mv = result.Mv
+	if result.Pv == nil {
+		pv = make(xdcrHLV.VersionsMap)
+	} else {
+		pv = result.Pv
+	}
+	if result.Mv == nil {
+		mv = make(xdcrHLV.VersionsMap)
+	} else {
+		mv = result.Mv
+	}
 	return
 }
 

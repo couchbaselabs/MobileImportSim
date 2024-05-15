@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	xdcrBase "github.com/couchbase/goxdcr/base"
+	xdcrLog "github.com/couchbase/goxdcr/log"
+
 	"github.com/couchbase/gocbcore/v10"
 )
 
@@ -82,3 +85,21 @@ func TagHttpPrefix(url *string) {
 }
 
 var ScramShaAuth = []gocbcore.AuthMechanism{gocbcore.ScramSha1AuthMechanism, gocbcore.ScramSha256AuthMechanism, gocbcore.ScramSha512AuthMechanism}
+
+func GetBucketConnStr(kvVbMap map[string][]uint16, url string, logger *xdcrLog.CommonLogger) string {
+	kvHostAddr := ""
+	for connStr := range kvVbMap {
+		kvHostAddr = connStr
+		break
+	}
+	hostname := xdcrBase.GetHostName(url)
+	var kvPort uint16
+	var err error
+	kvPort, err = xdcrBase.GetPortNumber(kvHostAddr)
+	if err != nil {
+		logger.Warnf("Error getting kv port. Will use 11210. kvVbMap=%v, url=%v", kvVbMap, url)
+		kvPort = 11210
+	}
+
+	return fmt.Sprintf("%v%v:%v", CouchbasePrefix, hostname, kvPort)
+}

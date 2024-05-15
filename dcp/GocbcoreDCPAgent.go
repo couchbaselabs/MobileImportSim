@@ -26,6 +26,7 @@ func (f *GocbcoreDCPFeed) setupDCPAgent(auth interface{}, collections bool) erro
 
 	err = agentConfig.FromConnStr(connStr)
 	if err != nil {
+		fmt.Printf("agentConfig.FromConnStr err=%v\n", err)
 	}
 
 	dcpFeedParams := NewDCPFeedParams()

@@ -36,14 +36,8 @@ func NewDcpHandler(dcpClient *DcpClient, index int, vbList []uint16, numberOfBin
 		return nil, fmt.Errorf("vbList is empty for handler %v", index)
 	}
 
-	bucketConnStr := dcpClient.dcpDriver.url
-	for connStr := range dcpClient.dcpDriver.kvVbMap {
-		bucketConnStr = connStr
-		break
-	}
-	bucketConnStr = fmt.Sprintf("%v%v", base.CouchbasePrefix, bucketConnStr)
 	agent := gocbcoreUtils.CreateSDKAgent(&gocbcore.AgentConfig{
-		SeedConfig: gocbcore.SeedConfig{MemdAddrs: []string{bucketConnStr}},
+		SeedConfig: gocbcore.SeedConfig{MemdAddrs: []string{dcpClient.dcpDriver.bucketConnStr}},
 		BucketName: dcpClient.dcpDriver.bucketName,
 		UserAgent:  fmt.Sprintf("mobileImportSim_%v/%v_%v", dcpClient.url, dcpClient.dcpDriver.bucketName, index),
 		SecurityConfig: gocbcore.SecurityConfig{

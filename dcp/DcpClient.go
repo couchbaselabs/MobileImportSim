@@ -173,14 +173,7 @@ func (c *DcpClient) initializeBucket() (err error) {
 		Password: c.dcpDriver.password,
 	}
 
-	bucketConnStr := c.dcpDriver.url
-	for connStr := range c.dcpDriver.kvVbMap {
-		bucketConnStr = connStr
-		break
-	}
-	bucketConnStr = fmt.Sprintf("%v%v", base.CouchbasePrefix, bucketConnStr)
-
-	c.gocbcoreDcpFeed, err = NewGocbcoreDCPFeed(c.Name, []string{bucketConnStr}, c.dcpDriver.bucketName, auth, false)
+	c.gocbcoreDcpFeed, err = NewGocbcoreDCPFeed(c.Name, []string{c.dcpDriver.bucketConnStr}, c.dcpDriver.bucketName, auth, false)
 	return
 }
 

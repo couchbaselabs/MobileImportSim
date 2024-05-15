@@ -153,6 +153,7 @@ func startDcpDriver(url, bucketName, username, password string, numberOfDcpClien
 
 	dcpDriver := dcp.NewDcpDriver(url, bucketName, username, password, int(numberOfDcpClients), int(numberOfWorkersPerDcpClient), int(numberOfBins),
 		int(dcpHandlerChanSize), time.Duration(bucketOpTimeout)*time.Second, errChan, waitGroup, bucketBufferCap, logger)
+
 	// dcp driver startup may take some time. Do it asynchronously
 	go startDcpDriverAysnc(dcpDriver, errChan, logger)
 	return dcpDriver

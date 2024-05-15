@@ -47,6 +47,9 @@ type DcpDriver struct {
 
 	username, password string
 	logger             *xdcrLog.CommonLogger
+
+	// In the form of couchbase://<Public-IP>:<kvPort> where public-ip should be input as url and kvPort is fetched from kvVbMap, if not found 11210 is used
+	bucketConnStr string
 }
 
 type VBStateWithLock struct {
@@ -101,7 +104,9 @@ func NewDcpDriver(url, bucketName, username, password string, numberOfClients, n
 	}
 
 	dcpDriver.initializeKVVBMapAndBucketUUID()
-	// base.TagHttpPrefix(&dcpDriver.url)
+
+	dcpDriver.bucketConnStr = base.GetBucketConnStr(dcpDriver.kvVbMap, dcpDriver.url, dcpDriver.logger)
+	dcpDriver.logger.Infof("Using bucketConnStr=%v", dcpDriver.bucketConnStr)
 
 	return dcpDriver
 

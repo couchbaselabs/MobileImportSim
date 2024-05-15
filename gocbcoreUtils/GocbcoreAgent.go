@@ -17,11 +17,13 @@ import (
 
 const SIMCAS string = "simCas"
 const PREVREV string = "pRev"
+const PCAS string = "pCAS"
 const IMPORTCAS string = "importCAS"
 const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + "." + SIMCAS
 const XATTR_MOU string = "_mou"
 const XATTR_PREVREV string = XATTR_MOU + "." + PREVREV
 const XATTR_IMPORTCAS string = XATTR_MOU + "." + IMPORTCAS
+const XATTR_PCAS string = XATTR_MOU + "." + PCAS // not used by XDCR, it exists because of eventing.
 
 type SubdocSetResult struct {
 	Cas uint64
@@ -119,6 +121,14 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
 			Path:  xdcrCrMeta.XATTR_VER_PATH,
+			Value: casNowBytes,
+		})
+
+		// _mou.PCAS = casNow = pre-import Cas
+		ops = append(ops, gocbcore.SubDocOp{
+			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
+			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
+			Path:  XATTR_PCAS,
 			Value: casNowBytes,
 		})
 

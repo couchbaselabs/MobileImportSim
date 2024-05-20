@@ -361,8 +361,9 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 		}
 		return nil
 	}
-	opErr := utils.ExponentialBackoffExecutor("SimulateImport", time.Duration(base.SimulateImportRetryInterval)*time.Second, base.SimulateImportMaxRetries,
-		base.SimulateImportBackOffFactor, time.Duration(base.SimulateImportMaxBackOff)*time.Second, simImport)
+	operatorName := fmt.Sprintf("DocKey: %s", m.Key)
+	opErr := utils.ExponentialBackoffExecutor(operatorName, time.Duration(base.SimulateImportRetryInterval)*time.Second, base.SimulateImportMaxRetries,
+		base.SimulateImportBackOffFactor, time.Duration(base.SimulateImportMaxBackOff)*time.Second, simImport, logger)
 	if opErr != nil {
 		logger.Errorf("Failed to Simulate import for mutation pertaining to doc after max Retries: %s", m.Key)
 		return fatalErrors, importedCnt

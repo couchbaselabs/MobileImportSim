@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	xdcrLog "github.com/couchbase/goxdcr/log"
 )
 
 // evenly distribute load across workers
@@ -72,7 +74,7 @@ type ExponentialOpFunc func() error
  * initialWait == Initial time with which to start
  * Factor == exponential backoff factor based off of initialWait
  */
-func ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, maxBackoff time.Duration, op ExponentialOpFunc) error {
+func ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, maxBackoff time.Duration, op ExponentialOpFunc, logger *xdcrLog.CommonLogger) error {
 	waitTime := initialWait
 	var opErr error
 	for i := 0; i <= maxRetries; i++ {
@@ -80,7 +82,7 @@ func ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetri
 		if opErr == nil {
 			return nil
 		} else if i != maxRetries {
-			fmt.Printf("%v executor failed with %v. retry=%v\n", name, opErr, i)
+			logger.Infof("SimulateImport for %v failed with %v. retry=%v. Will retry after %v\n", name, opErr, i, waitTime)
 			time.Sleep(waitTime)
 			waitTime *= time.Duration(factor)
 			if waitTime > maxBackoff {
@@ -89,12 +91,12 @@ func ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetri
 		}
 	}
 	// opErr = fmt.Errorf("%v Operation failed after max retries. Last error: %v", name, opErr.Error())
-	fmt.Printf("Retrying the op until it is successful with retry interval %v", waitTime)
+	logger.Infof("Retrying the op until it is successful with retry interval %v", waitTime)
 	count := maxRetries + 1
 	for {
 		opErr = op()
 		if opErr == nil {
-			fmt.Printf("The operation succeeded after %v retires", count)
+			logger.Infof("The operation succeeded after %v retries", count)
 			break
 		}
 		time.Sleep(waitTime)

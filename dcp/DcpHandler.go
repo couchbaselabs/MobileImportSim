@@ -3,11 +3,12 @@ package dcp
 import (
 	"crypto/x509"
 	"fmt"
-	"sync"
-	"sync/atomic"
-
 	"mobileImportSim/base"
 	"mobileImportSim/gocbcoreUtils"
+	"mobileImportSim/utils"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/couchbase/gocbcore/v10"
 	"github.com/couchbase/gomemcached"
@@ -249,12 +250,12 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 	importedCnt := 0
 
 	// retry until every step is successful
-	for {
+	simImport := func() error {
 		if datatype&xdcrBase.PROTOCOL_BINARY_DATATYPE_XATTR > 0 {
 			it, err := xdcrBase.NewXattrIterator(body)
 			if err != nil {
 				logger.Errorf("For key %s, colId %v, error while initing xattr iterator, err=%v\n", key, colID, err)
-				continue
+				return err
 			}
 
 			var err1 error
@@ -263,7 +264,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while getting next xattr, err=%v\n", key, colID, err)
 					err1 = err
-					continue
+					return err
 				}
 
 				switch string(k) {
@@ -273,7 +274,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 					_, _, _, err = gojsonsm.MatchAndRemoveItemsFromJsonObject(v, []string{gocbcoreUtils.IMPORTCAS, gocbcoreUtils.PREVREV}, newMou, removed)
 					if err != nil {
 						err1 = err
-						continue
+						return err
 					}
 
 					importCas, ok1 := removed[gocbcoreUtils.IMPORTCAS]
@@ -282,21 +283,21 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 						if err != nil {
 							logger.Errorf("For key %s, colId %v, error while parsing importCas value, err=%v\n", key, colID, err)
 							err1 = err
-							continue
+							return err
 						}
 					}
 					if casIn < importCasIn {
 						logger.Errorf("For key %s, colId %v, FATAL error of cas < importCas for mutation, err=%v\n", key, colID, err)
 						fatalErrors++
 						err1 = err
-						continue
+						return err
 					}
 				case xdcrBase.XATTR_MOBILE:
 					syncIt, err := xdcrBase.NewCCRXattrFieldIterator(v)
 					if err != nil {
 						logger.Errorf("For key %s, colId %v, error while initing sync xattr iterator, err=%v\n", key, colID, err)
 						err1 = err
-						continue
+						return err
 					}
 
 					var err2 error
@@ -305,7 +306,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 						if err != nil {
 							logger.Errorf("For key %s, colId %v, error while getting next syncIt xattr, err=%v\n", key, colID, err)
 							err2 = err
-							continue
+							return err
 						}
 						switch string(k1) {
 						case gocbcoreUtils.SIMCAS:
@@ -313,14 +314,14 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 							if err != nil {
 								logger.Errorf("For key %s, colId %v, error while parsing syncCasIn, err=%v\n", key, colID, err)
 								err2 = err
-								continue
+								return err
 							}
 						}
 					}
 
 					if err2 != nil {
 						err1 = err2
-						continue
+						return err1
 					}
 				}
 			}
@@ -329,7 +330,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 		casNow, syncCasNow, revIdNow, importCasNow, pvNow, mvNow, oldPvLen, oldMvLen, srcNow, verNow, cvCasNow, err := gocbcoreUtils.GetDocAsOfNow(agent, key, colID)
 		if err != nil {
 			logger.Errorf("For key %s, colId %v, error while subdoc-get err=%v\n", key, colID, err)
-			continue
+			return err
 		}
 
 		logger.Debugf("For key %s, colId %v, casIn %v, importCasIn %v, syncCasIn %v: casNow %v, cvCasNow %v, syncCasNow %v, revIdNow %v, importCasNow %v", key, colID, casIn, importCasIn, syncCasIn, casNow, cvCasNow, syncCasNow, revIdNow, importCasNow)
@@ -344,7 +345,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
-					continue
+					return err
 				}
 				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
@@ -352,14 +353,19 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
-					continue
+					return err
 				}
 				logger.Debugf("For key %s, colId %v, casIn %v: non-local post-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
 			}
 		}
-		// everything successful - break
-		break
+		return nil
+	}
+	opErr := utils.ExponentialBackoffExecutor("SimulateImport", time.Duration(base.SimulateImportRetryInterval)*time.Second, base.SimulateImportMaxRetries,
+		base.SimulateImportBackOffFactor, time.Duration(base.SimulateImportMaxBackOff)*time.Second, simImport)
+	if opErr != nil {
+		logger.Errorf("Failed to Simulate import for mutation pertaining to doc after max Retries: %s", m.Key)
+		return fatalErrors, importedCnt
 	}
 	return fatalErrors, importedCnt
 }

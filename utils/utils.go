@@ -65,6 +65,44 @@ func WaitForWaitGroup(waitGroup *sync.WaitGroup, doneChan chan bool) {
 
 type ExponentialOpFunc func() error
 
+/**
+ * Executes a anonymous function that returns an error. If the error is non nil, retry with exponential backoff.
+ * Returns base.ErrorFailedAfterRetry + the last recorded error if operation times out, nil otherwise.
+ * Max retries == the times to retry in additional to the initial try, should the initial try fail
+ * initialWait == Initial time with which to start
+ * Factor == exponential backoff factor based off of initialWait
+ */
+func ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, maxBackoff time.Duration, op ExponentialOpFunc) error {
+	waitTime := initialWait
+	var opErr error
+	for i := 0; i <= maxRetries; i++ {
+		opErr = op()
+		if opErr == nil {
+			return nil
+		} else if i != maxRetries {
+			fmt.Printf("%v executor failed with %v. retry=%v\n", name, opErr, i)
+			time.Sleep(waitTime)
+			waitTime *= time.Duration(factor)
+			if waitTime > maxBackoff {
+				waitTime = maxBackoff
+			}
+		}
+	}
+	// opErr = fmt.Errorf("%v Operation failed after max retries. Last error: %v", name, opErr.Error())
+	fmt.Printf("Retrying the op until it is successful with retry interval %v", waitTime)
+	count := maxRetries + 1
+	for {
+		opErr = op()
+		if opErr == nil {
+			fmt.Printf("The operation succeeded after %v retires", count)
+			break
+		}
+		time.Sleep(waitTime)
+		count++
+	}
+	return opErr
+}
+
 // add to error chan without blocking
 func AddToErrorChan(errChan chan error, err error) {
 	select {

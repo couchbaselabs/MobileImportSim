@@ -16,3 +16,8 @@ const CouchbasePrefix = "couchbase://"
 var SetupTimeoutSeconds int = 10
 
 const Uint32MaxVal uint32 = 1<<32 - 1
+
+const SimulateImportMaxBackOff = 64
+const SimulateImportBackOffFactor = 2
+const SimulateImportRetryInterval = 2
+const SimulateImportMaxRetries = 15

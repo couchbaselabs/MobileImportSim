@@ -31,7 +31,7 @@ type SubdocSetResult struct {
 }
 
 // return Cas post-import and error, if any
-func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, casIn, importCasIn, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
 	src, err := xdcrBase.HexToBase64(bucketUUID)
 	if err != nil {
@@ -68,6 +68,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 	pvBytes = pvBytes[:pos]
 
 	casNowBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casNow)) + "\"")
+	casInBytes := []byte("\"" + string(xdcrBase.Uint64ToHexLittleEndian(casIn)) + "\"")
 
 	ops := make([]gocbcore.SubDocOp, 0)
 
@@ -91,12 +92,12 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 			Value: []byte(revID),
 		})
 	}
-	// _sync.simCas = macro expandaded (???)
+	// _sync.simCas = casIn of the mutation
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath | memd.SubdocFlagExpandMacros,
 		Path:  XATTR_SYNC,
-		Value: []byte(xdcrBase.CAS_MACRO_EXPANSION),
+		Value: casInBytes,
 	})
 
 	if updateHLV {

@@ -342,7 +342,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			// 3. casIn > importCasIn											-> non-import mutation - update both importCas and HLV.
 
 			if casIn > importCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casIn, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, casNow > cvCasNow)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					return err
@@ -350,7 +350,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
 			} else if syncCasIn != 0 && casIn > syncCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, casIn, importCasIn, casNow, revIdNow, srcNow, verNow, pvNow, mvNow, oldPvLen, oldMvLen, colID, bucketUUID, false)
 				if err != nil {
 					logger.Errorf("For key %s, colId %v, error while subdoc-set err=%v\n", key, colID, err)
 					return err
@@ -361,8 +361,8 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 		}
 		return nil
 	}
-	operatorName := fmt.Sprintf("DocKey: %s", m.Key)
-	opErr := utils.ExponentialBackoffExecutor(operatorName, time.Duration(base.SimulateImportRetryInterval)*time.Second, base.SimulateImportMaxRetries,
+	operationName := fmt.Sprintf("simImport for docKey: %s", m.Key)
+	opErr := utils.ExponentialBackoffExecutor(operationName, time.Duration(base.SimulateImportRetryInterval)*time.Second, base.SimulateImportMaxRetries,
 		base.SimulateImportBackOffFactor, time.Duration(base.SimulateImportMaxBackOff)*time.Second, simImport, logger)
 	if opErr != nil {
 		logger.Errorf("Failed to Simulate import for mutation pertaining to doc after max Retries: %s", m.Key)

@@ -95,7 +95,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, casIn, importCasIn, 
 	// _sync.simCas = casIn of the mutation
 	ops = append(ops, gocbcore.SubDocOp{
 		Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
-		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath | memd.SubdocFlagExpandMacros,
+		Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
 		Path:  XATTR_SYNC,
 		Value: casInBytes,
 	})

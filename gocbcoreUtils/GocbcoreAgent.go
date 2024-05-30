@@ -33,8 +33,12 @@ type SubdocSetResult struct {
 // return Cas post-import and error, if any
 func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow, revIdNow uint64, srcNow xdcrHLV.DocumentSourceId, verNow uint64, pvNow, mvNow xdcrHLV.VersionsMap, oldPvLen, oldMvLen uint64, colID uint32, bucketUUID string, updateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
+	src, err := xdcrBase.HexToBase64(bucketUUID)
+	if err != nil {
+		return 0, err
+	}
+
 	// roll over mv to pv OR cv to pv, if needed
-	src := xdcrHLV.DocumentSourceId(bucketUUID)
 	pv := pvNow
 	if len(mvNow) > 0 {
 		// Add mv to pv, no need to add cv to history because it represents a merge event
@@ -51,7 +55,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 
 	}
 	// Make sure the cv is not repeated in pv
-	delete(pv, src)
+	delete(pv, hlv.DocumentSourceId(src))
 
 	pvMaxLen := oldPvLen + oldMvLen + uint64(len(srcNow)) +
 		2 /* quotes for srcNow */ + 16 /* ver in hex */ + 2 /* 0x */ +
@@ -103,12 +107,9 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 			Path:  xdcrCrMeta.XATTR_CVCAS_PATH,
 			Value: casNowBytes,
 		})
+
 		// _vv.src = bucketUUID
-		base64Src, err := xdcrBase.HexToBase64(string(src))
-		if err != nil {
-			return 0, err
-		}
-		srcBytes := []byte("\"" + string(base64Src) + "\"")
+		srcBytes := []byte("\"" + string(src) + "\"")
 		ops = append(ops, gocbcore.SubDocOp{
 			Op:    memd.SubDocOpType(memd.CmdSubDocDictSet),
 			Flags: memd.SubdocFlagMkDirP | memd.SubdocFlagXattrPath,
@@ -151,7 +152,7 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casNow,
 			})
 		}
 
-		// _vv.mv - mv won't exists anymore since we rolled it over to pv
+		// _vv.mv - mv won't exist anymore since we rolled it over to pv
 		// remove mv, it is rolled to mv if non-empty
 		if oldMvLen > 2 {
 			// delete old mv

@@ -1,5 +1,7 @@
 package base
 
+import "errors"
+
 const NumberOfVbuckets = 1024
 const DcpHandlerChanSize = 100000
 const BucketBufferCapacity = 100000
@@ -21,3 +23,5 @@ const SimulateImportMaxBackOff = 64
 const SimulateImportBackOffFactor = 2
 const SimulateImportRetryInterval = 2
 const SimulateImportMaxRetries = 15
+
+var ErrorNotImported error = errors.New("Mutation was not imported")

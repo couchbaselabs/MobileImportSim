@@ -32,11 +32,11 @@ type SubdocSetResult struct {
 }
 
 // return Cas post-import and error, if any
-func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn uint64, cvSrcIn xdcrHLV.DocumentSourceId, pvIn, mvIn xdcrHLV.VersionsMap, colID uint32, bucketUUID string, canUpdateHLV bool) (uint64, error) {
+func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn uint64, cvSrcIn xdcrHLV.DocumentSourceId, pvIn, mvIn xdcrHLV.VersionsMap, colID uint32, src xdcrHLV.DocumentSourceId, canUpdateHLV bool) (uint64, error) {
 	signal := make(chan SubdocSetResult)
 
 	// regenerate HLV
-	newHlv, err := xdcrHLV.NewHLV(xdcrHLV.DocumentSourceId(bucketUUID), casIn, cvCasIn, cvSrcIn, cvVerIn, pvIn, mvIn)
+	newHlv, err := xdcrHLV.NewHLV(src, casIn, cvCasIn, cvSrcIn, cvVerIn, pvIn, mvIn)
 	if err != nil {
 		return 0, err
 	}

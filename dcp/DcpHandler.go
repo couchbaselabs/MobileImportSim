@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	xdcrBase "github.com/couchbase/goxdcr/base"
 	xdcrCrMeta "github.com/couchbase/goxdcr/crMeta"
+	"github.com/couchbase/goxdcr/hlv"
 	xdcrHLV "github.com/couchbase/goxdcr/hlv"
 	xdcrLog "github.com/couchbase/goxdcr/log"
 	"github.com/couchbaselabs/gojsonsm"
@@ -106,7 +107,7 @@ done:
 
 func (dh *DcpHandler) simulateMobileImport(mut *Mutation) {
 	dh.dcpClient.dcpDriver.logger.Debugf("Simulating import, key=%s for mutation=%v", mut.Key, mut)
-	errCnt, importCnt := mut.SimulateImport(dh.agent, dh.dcpClient.dcpDriver.logger, dh.dcpClient.dcpDriver.bucketUUID)
+	errCnt, importCnt := mut.SimulateImport(dh.agent, dh.dcpClient.dcpDriver.logger, dh.dcpClient.dcpDriver.actorId)
 	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalFatalErrors, uint64(errCnt))
 	atomic.AddUint64(&dh.dcpClient.dcpDriver.totalNewImports, uint64(importCnt))
 }
@@ -239,7 +240,7 @@ func (m *Mutation) IsSystemOrUnsubbedEvent() bool {
 	return m.OpCode == gomemcached.DCP_SYSTEM_EVENT || m.OpCode == gomemcached.DCP_SEQNO_ADV
 }
 
-func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonLogger, bucketUUID string) (int, int) {
+func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonLogger, actorId hlv.DocumentSourceId) (int, int) {
 	key := m.Key
 	body := m.Value
 	colID := m.ColId
@@ -325,15 +326,10 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 			}
 		}
 
-		srcBytes, err := xdcrBase.HexToBase64(bucketUUID)
-		if err != nil {
-			return err
-		}
-
 		logger.Debugf("For key %s, colId %v, revIdIn %v, casIn %v, importCasIn %v, syncCasIn %v, cvCasIn %v, cvVerIn %v, cvSrcIn %v, pvMapIn %v, mvMapIn %v", key, colID, revIdIn, casIn, importCasIn, syncCasIn, cvCasIn, cvVerIn, cvSrcIn, pvMapIn, mvMapIn)
 		if casIn != syncCasIn {
 			if casIn != importCasIn {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn, cvSrcIn, pvMapIn, mvMapIn, colID, xdcrHLV.DocumentSourceId(srcBytes), true)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn, cvSrcIn, pvMapIn, mvMapIn, colID, actorId, true)
 				if err != nil {
 					if err == base.ErrorNotImported {
 						logger.Debugf("For key %s, colId %v, casIn %v: not imported because casIn != casNow", key, colID, casIn)
@@ -345,7 +341,7 @@ func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonL
 				logger.Debugf("For key %s, colId %v, casIn %v: non-import mutation: postImportCas %v", key, colID, casIn, postImportCas)
 				importedCnt++
 			} else {
-				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn, cvSrcIn, pvMapIn, mvMapIn, colID, xdcrHLV.DocumentSourceId(srcBytes), false)
+				postImportCas, err := gocbcoreUtils.WriteImportMutation(agent, key, importCasIn, casIn, cvCasIn, cvVerIn, revIdIn, cvSrcIn, pvMapIn, mvMapIn, colID, actorId, false)
 				if err != nil {
 					if err == base.ErrorNotImported {
 						logger.Debugf("For key %s, colId %v, casIn %v: not imported because casIn != casNow", key, colID, casIn)

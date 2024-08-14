@@ -10,6 +10,7 @@ import (
 
 	gocbcore "github.com/couchbase/gocbcore/v10"
 	xdcrBase "github.com/couchbase/goxdcr/base"
+	xdcrHLV "github.com/couchbase/goxdcr/hlv"
 	xdcrLog "github.com/couchbase/goxdcr/log"
 	xdcrUtils "github.com/couchbase/goxdcr/utils"
 )
@@ -37,7 +38,7 @@ type DcpDriver struct {
 	finChan        chan bool
 	bufferCapacity int
 	kvVbMap        map[string][]uint16
-	bucketUUID     string
+	actorId        xdcrHLV.DocumentSourceId
 
 	// various counters
 	totalNumReceivedFromDCP                uint64
@@ -103,7 +104,12 @@ func NewDcpDriver(url, bucketName, username, password string, numberOfClients, n
 		}
 	}
 
-	dcpDriver.initializeKVVBMapAndBucketUUID()
+	err := dcpDriver.initializeKVVBMapAndUUIDs()
+	if err != nil {
+		errMsg := fmt.Sprintf("error initing kvVbMap and UUIDs, err=%v", err)
+		dcpDriver.logger.Fatalf(errMsg)
+		panic(errMsg)
+	}
 
 	dcpDriver.bucketConnStr = base.GetBucketConnStr(dcpDriver.kvVbMap, dcpDriver.url, dcpDriver.logger)
 	dcpDriver.logger.Infof("Using bucketConnStr=%v", dcpDriver.bucketConnStr)
@@ -292,18 +298,33 @@ func (d *DcpDriver) IncrementSysOrUnsubbedEventReceived() {
 	atomic.AddUint64(&d.totalSysOrUnsubbedEventReceivedFromDCP, 1)
 }
 
-func (dcpDriver *DcpDriver) initializeKVVBMapAndBucketUUID() {
+func (dcpDriver *DcpDriver) initializeKVVBMapAndUUIDs() error {
 	var kvVbMap map[string][]uint16
 
 	_, _, bucketUUID, _, _, kvVbMap, err := dcpDriver.utils.BucketValidationInfo(dcpDriver.url, dcpDriver.bucketName, dcpDriver.username,
 		dcpDriver.password, xdcrBase.HttpAuthMechPlain, []byte{}, false, []byte{}, []byte{}, dcpDriver.logger)
 	if err != nil {
 		dcpDriver.logger.Errorf("initializeKVVBMap error=%v", err)
-		return
+		return err
 	}
 
-	dcpDriver.logger.Infof("BucketUUID for bucket %v = %v; KvVbMap fetched for %v = %v", dcpDriver.bucketName, bucketUUID, dcpDriver.Name, kvVbMap)
+	clusterUUID, err := dcpDriver.utils.GetClusterUUID(dcpDriver.url, dcpDriver.username, dcpDriver.password, xdcrBase.HttpAuthMechPlain, []byte{}, false, []byte{}, []byte{}, dcpDriver.logger)
+	if err != nil {
+		dcpDriver.logger.Errorf("GetClusterUUID error=%v", err)
+		return err
+	}
+
+	actorId, err := xdcrHLV.UUIDstoDocumentSource(bucketUUID, clusterUUID)
+	if err != nil {
+		dcpDriver.logger.Errorf("UUIDstoDocumentSource error=%v, bucketUUID=%s, clusterUUID=%s", err, bucketUUID, clusterUUID)
+		return err
+	}
+
+	dcpDriver.logger.Infof("BucketUUID for bucket %s = %s; ClusterUUID for url %s = %s; ActorId generated = %s; KvVbMap fetched for %v = %v",
+		dcpDriver.bucketName, bucketUUID, dcpDriver.url, clusterUUID, actorId, dcpDriver.Name, kvVbMap)
 
 	dcpDriver.kvVbMap = kvVbMap
-	dcpDriver.bucketUUID = bucketUUID
+	dcpDriver.actorId = actorId
+
+	return nil
 }

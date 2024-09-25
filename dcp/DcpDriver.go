@@ -9,10 +9,10 @@ import (
 	"time"
 
 	gocbcore "github.com/couchbase/gocbcore/v10"
-	xdcrBase "github.com/couchbase/goxdcr/base"
-	xdcrHLV "github.com/couchbase/goxdcr/hlv"
-	xdcrLog "github.com/couchbase/goxdcr/log"
-	xdcrUtils "github.com/couchbase/goxdcr/utils"
+	xdcrBase "github.com/couchbase/goxdcr/v8/base"
+	xdcrHLV "github.com/couchbase/goxdcr/v8/hlv"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
+	xdcrUtils "github.com/couchbase/goxdcr/v8/utils"
 )
 
 type DcpDriver struct {

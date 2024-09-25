@@ -12,11 +12,10 @@ import (
 
 	"github.com/couchbase/gocbcore/v10"
 	"github.com/couchbase/gomemcached"
-	xdcrBase "github.com/couchbase/goxdcr/base"
-	xdcrCrMeta "github.com/couchbase/goxdcr/crMeta"
-	"github.com/couchbase/goxdcr/hlv"
-	xdcrHLV "github.com/couchbase/goxdcr/hlv"
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrBase "github.com/couchbase/goxdcr/v8/base"
+	xdcrCrMeta "github.com/couchbase/goxdcr/v8/crMeta"
+	xdcrHLV "github.com/couchbase/goxdcr/v8/hlv"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbaselabs/gojsonsm"
 )
 
@@ -240,7 +239,7 @@ func (m *Mutation) IsSystemOrUnsubbedEvent() bool {
 	return m.OpCode == gomemcached.DCP_SYSTEM_EVENT || m.OpCode == gomemcached.DCP_SEQNO_ADV
 }
 
-func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonLogger, actorId hlv.DocumentSourceId) (int, int) {
+func (m *Mutation) SimulateImport(agent *gocbcore.Agent, logger *xdcrLog.CommonLogger, actorId xdcrHLV.DocumentSourceId) (int, int) {
 	key := m.Key
 	body := m.Value
 	colID := m.ColId

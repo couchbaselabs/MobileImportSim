@@ -9,11 +9,11 @@ import (
 
 	"github.com/couchbase/gocbcore/v10"
 	"github.com/couchbase/gocbcore/v10/memd"
-	xdcrBase "github.com/couchbase/goxdcr/base"
-	xdcrCrMeta "github.com/couchbase/goxdcr/crMeta"
-	"github.com/couchbase/goxdcr/hlv"
-	xdcrHLV "github.com/couchbase/goxdcr/hlv"
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrBase "github.com/couchbase/goxdcr/v8/base"
+	xdcrCrMeta "github.com/couchbase/goxdcr/v8/crMeta"
+	"github.com/couchbase/goxdcr/v8/hlv"
+	xdcrHLV "github.com/couchbase/goxdcr/v8/hlv"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 )
 
 const SIMCAS string = "simCas"
@@ -120,7 +120,10 @@ func WriteImportMutation(agent *gocbcore.Agent, key []byte, importCasIn, casIn, 
 		pos := 0
 		// 0 indicates no pruning (for now). TODO: Use pruning window
 		pruneFunc := xdcrBase.GetHLVPruneFunction(casIn, 0)
-		pos, _ = xdcrCrMeta.VersionMapToDeltasBytes(newPv, pvBytes, pos, &pruneFunc)
+		pos, _, err = xdcrCrMeta.VersionMapToDeltasBytes(newPv, pvBytes, pos, &pruneFunc)
+		if err != nil {
+			return 0, err
+		}
 		pvBytes = pvBytes[:pos]
 
 		// _vv.pv = updated pv

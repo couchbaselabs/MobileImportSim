@@ -22,7 +22,7 @@ import (
 	"mobileImportSim/utils"
 
 	"github.com/couchbase/gocbcore/v10"
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 )
 
 var options struct {

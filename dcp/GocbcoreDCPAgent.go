@@ -8,7 +8,7 @@ import (
 
 	gocbcore "github.com/couchbase/gocbcore/v10"
 	memd "github.com/couchbase/gocbcore/v10/memd"
-	xdcrBase "github.com/couchbase/goxdcr/base"
+	xdcrBase "github.com/couchbase/goxdcr/v8/base"
 )
 
 type GocbcoreDCPFeed struct {

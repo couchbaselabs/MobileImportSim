@@ -12,7 +12,7 @@ import (
 
 	gocb "github.com/couchbase/gocb/v2"
 	gocbcore "github.com/couchbase/gocbcore/v10"
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 )
 
 type DcpClient struct {

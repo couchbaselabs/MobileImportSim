@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	xdcrBase "github.com/couchbase/goxdcr/base"
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrBase "github.com/couchbase/goxdcr/v8/base"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 
 	"github.com/couchbase/gocbcore/v10"
 )

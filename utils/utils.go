@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	xdcrLog "github.com/couchbase/goxdcr/log"
+	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 )
 
 // evenly distribute load across workers

@@ -2,7 +2,6 @@ package base
 
 import "errors"
 
-const NumberOfVbuckets = 1024
 const DcpHandlerChanSize = 100000
 const BucketBufferCapacity = 100000
 

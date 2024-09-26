@@ -49,8 +49,12 @@ type DcpDriver struct {
 	username, password string
 	logger             *xdcrLog.CommonLogger
 
-	// In the form of couchbase://<Public-IP>:<kvPort> where public-ip should be input as url and kvPort is fetched from kvVbMap, if not found 11210 is used
+	// In the form of couchbase://<Public-IP>:<kvPort>
+	// where public-ip should be input as url and kvPort is fetched from kvVbMap,
+	// if not found 11210 is used
 	bucketConnStr string
+
+	numVbuckets uint16
 }
 
 type VBStateWithLock struct {
@@ -97,18 +101,18 @@ func NewDcpDriver(url, bucketName, username, password string, numberOfClients, n
 		logger:             logger,
 	}
 
-	var vbno uint16
-	for vbno = 0; vbno < base.NumberOfVbuckets; vbno++ {
-		dcpDriver.vbStateMap[vbno] = &VBStateWithLock{
-			vbState: VBStateNormal,
-		}
-	}
-
 	err := dcpDriver.initializeKVVBMapAndUUIDs()
 	if err != nil {
 		errMsg := fmt.Sprintf("error initing kvVbMap and UUIDs, err=%v", err)
 		dcpDriver.logger.Fatalf(errMsg)
 		panic(errMsg)
+	}
+
+	var vbno uint16
+	for vbno = 0; vbno < dcpDriver.numVbuckets; vbno++ {
+		dcpDriver.vbStateMap[vbno] = &VBStateWithLock{
+			vbState: VBStateNormal,
+		}
 	}
 
 	dcpDriver.bucketConnStr = base.GetBucketConnStr(dcpDriver.kvVbMap, dcpDriver.url, dcpDriver.logger)
@@ -143,13 +147,13 @@ func (d *DcpDriver) checkForCompletion() {
 		case <-ticker.C:
 			var numOfCompletedVb int
 			var vbno uint16
-			for vbno = 0; vbno < base.NumberOfVbuckets; vbno++ {
+			for vbno = 0; vbno < d.numVbuckets; vbno++ {
 				vbState := d.getVbState(vbno)
 				if vbState != VBStateNormal {
 					numOfCompletedVb++
 				}
 			}
-			if numOfCompletedVb == base.NumberOfVbuckets {
+			if numOfCompletedVb == int(d.numVbuckets) {
 				d.logger.Infof("%v all vbuckets have completed for dcp driver", d.Name)
 				d.Stop()
 				return
@@ -197,7 +201,7 @@ func (d *DcpDriver) initializeDcpClients() {
 	d.stateLock.Lock()
 	defer d.stateLock.Unlock()
 
-	loadDistribution := utils.BalanceLoad(d.numberOfClients, base.NumberOfVbuckets)
+	loadDistribution := utils.BalanceLoad(d.numberOfClients, int(d.numVbuckets))
 	for i := 0; i < d.numberOfClients; i++ {
 		lowIndex := loadDistribution[i][0]
 		highIndex := loadDistribution[i][1]
@@ -320,11 +324,16 @@ func (dcpDriver *DcpDriver) initializeKVVBMapAndUUIDs() error {
 		return err
 	}
 
-	dcpDriver.logger.Infof("BucketUUID for bucket %s = %s; ClusterUUID for url %s = %s; ActorId generated = %s; KvVbMap fetched for %v = %v",
-		dcpDriver.bucketName, bucketUUID, dcpDriver.url, clusterUUID, actorId, dcpDriver.Name, kvVbMap)
-
 	dcpDriver.kvVbMap = kvVbMap
 	dcpDriver.actorId = actorId
+
+	dcpDriver.numVbuckets = 0
+	for _, v := range kvVbMap {
+		dcpDriver.numVbuckets += uint16(len(v))
+	}
+
+	dcpDriver.logger.Infof("BucketUUID for bucket %s = %s; ClusterUUID for url %s = %s; ActorId generated = %s; KvVbMap fetched for %v = %v; numVbuckets = %v",
+		dcpDriver.bucketName, bucketUUID, dcpDriver.url, clusterUUID, actorId, dcpDriver.Name, kvVbMap, dcpDriver.numVbuckets)
 
 	return nil
 }

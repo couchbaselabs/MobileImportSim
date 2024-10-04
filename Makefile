@@ -22,5 +22,5 @@ deps:
 	$(GOGET) github.com/couchbase/gocb/v2
 	$(GOGET) github.com/couchbaselabs/gojsonsm@v1.0.1
 	$(GOGET) github.com/couchbase/cbauth@v0.1.5
-	$(GOGET) github.com/couchbase/goxdcr/v8@v8.0.0-1862
+	$(GOGET) github.com/couchbase/goxdcr/v8@764c22ce7cb33e7867438fc3bd1c80b74f774e0a
 	$(GOGET) github.com/couchbase/gomemcached@v0.3.2

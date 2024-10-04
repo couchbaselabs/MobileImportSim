@@ -11,20 +11,20 @@ import (
 	"github.com/couchbase/gocbcore/v10/memd"
 	xdcrBase "github.com/couchbase/goxdcr/v8/base"
 	xdcrCrMeta "github.com/couchbase/goxdcr/v8/crMeta"
-	"github.com/couchbase/goxdcr/v8/hlv"
 	xdcrHLV "github.com/couchbase/goxdcr/v8/hlv"
 	xdcrLog "github.com/couchbase/goxdcr/v8/log"
 )
 
 const SIMCAS string = "simCas"
-const PREVREV string = "pRev"
-const PCAS string = "pCAS"
-const IMPORTCAS string = "importCAS"
-const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + "." + SIMCAS
-const XATTR_MOU string = "_mou"
-const XATTR_PREVREV string = XATTR_MOU + "." + PREVREV
-const XATTR_IMPORTCAS string = XATTR_MOU + "." + IMPORTCAS
-const XATTR_PCAS string = XATTR_MOU + "." + PCAS // not used by XDCR, it exists because of eventing.
+const PCAS string = "pCas"
+const PERIOD = xdcrBase.PERIOD
+const PREVREV string = xdcrBase.PREVIOUSREV
+const IMPORTCAS string = xdcrBase.IMPORTCAS
+const XATTR_SYNC string = xdcrBase.XATTR_MOBILE + PERIOD + SIMCAS
+const XATTR_MOU string = xdcrBase.XATTR_MOU
+const XATTR_PREVREV string = XATTR_MOU + PERIOD + PREVREV
+const XATTR_IMPORTCAS string = XATTR_MOU + PERIOD + IMPORTCAS
+const XATTR_PCAS string = XATTR_MOU + PERIOD + PCAS // not used by XDCR, it exists because of eventing.
 
 type SubdocSetResult struct {
 	Cas uint64
@@ -207,8 +207,8 @@ type SubdocGetResult struct {
 	CvCas                       uint64
 }
 
-func xattrVVtoDeltas(vvBytes []byte) (hlv.VersionsMap, error) {
-	vv := make(hlv.VersionsMap)
+func xattrVVtoDeltas(vvBytes []byte) (xdcrHLV.VersionsMap, error) {
+	vv := make(xdcrHLV.VersionsMap)
 
 	if len(vvBytes) == 0 {
 		return vv, nil
@@ -224,7 +224,7 @@ func xattrVVtoDeltas(vvBytes []byte) (hlv.VersionsMap, error) {
 		if err != nil {
 			return nil, err
 		}
-		src := hlv.DocumentSourceId(k)
+		src := xdcrHLV.DocumentSourceId(k)
 		ver, err := xdcrBase.HexLittleEndianToUint64(v)
 		if err != nil {
 			return nil, err

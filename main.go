@@ -86,14 +86,11 @@ type mobileImportSim struct {
 func NewMobileImportSim(debugMode uint64) (*mobileImportSim, error) {
 	var err error
 	ctx := xdcrLog.DefaultLoggerContext
-
 	if debugMode == 1 {
 		ctx.Log_level = xdcrLog.LogLevelDebug
 	} else if debugMode == 2 {
-		if debugMode == 1 {
-			gocbcore.SetLogger(gocbcore.VerboseStdioLogger())
-			ctx.Log_level = xdcrLog.LogLevelDebug
-		}
+		gocbcore.SetLogger(gocbcore.VerboseStdioLogger())
+		ctx.Log_level = xdcrLog.LogLevelDebug
 	}
 
 	importSim := &mobileImportSim{
